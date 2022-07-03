@@ -55,17 +55,54 @@ impl Decoder {
 
                 let background_color_index = LittleEndian::read_u16(&contents[12..=13]);
                 let pixel_aspect_ratio = LittleEndian::read_u16(&contents[14..=15]);
-                let mut offset: usize = 16;
-                let length: usize = (3 * u16::pow(2, (global_color_size + 1).into())).into();
 
+                let mut offset: usize = 16;
+                let length: usize = 3 * usize::pow(2, (global_color_size + 1).into());
+
+                // Global Color Table
                 let mut i: usize = offset;
-                while i < length {
-                    let r = contents[i];
-                    let g = contents[i+1];
-                    let b = contents[i+2];
-                    println!("{:x}, {:x}, {:x}", r, g, b);
-                    i = i + 6;
+                let mut color_vector: Vec<Color> = Vec::new();
+
+                while i < offset + length {
+                    color_vector.push(Color{ red: contents[i], green: contents[i+1], blue: contents[i+2], alpha: 255 });
+                    i = i + 3;
                 }
+                // End
+                
+                // Graphic Control Extension
+                offset = offset + length;
+                let extension_introducer = LittleEndian::read_u16(&contents[offset..offset+2]);
+                if extension_introducer != 21 {
+                    println!("Something went wrong here.")
+                }
+                offset = offset + 2;
+
+                let graphic_control_label = LittleEndian::read_u16(&contents[offset..offset+2]);
+                if graphic_control_label != 249 {
+                    println!("Something went wrong here.")
+                }
+                offset = offset + 2;
+
+                let byte_size = LittleEndian::read_u16(&contents[offset..offset+2]);
+                offset = offset + 2;
+
+                let packed_field = LittleEndian::read_u16(&contents[offset..offset+2]);
+                let disposal_method = (packed_field & 0b0001_1100) as u8;
+                let user_input_flag = (packed_field & 0b0000_0010) != 0;
+                let transparent_color_flag = (packed_field & 0b0000_0001) != 0;
+                offset = offset + 2;
+
+                let delay_time = LittleEndian::read_u32(&contents[offset..offset+4]);
+                offset = offset + 4;
+
+                let transparent_color_index = LittleEndian::read_u16(&contents[offset..offset+2]);
+                offset = offset + 2;
+                
+                let block_terminator = LittleEndian::read_u16(&contents[offset..offset+2]); // This must be "00"
+                offset = offset + 2;
+                // End
+                
+                
             }
             "87a" => {}
             _ => {}

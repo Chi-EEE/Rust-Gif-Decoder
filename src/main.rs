@@ -6,6 +6,6 @@ use std::{fs, str::Utf8Error};
 
 
 fn main() -> std::io::Result<()> {
-    Decoder::decode("aware.gif");
+    Decoder::decode("./gifs/aware.gif");
     Ok(())
 }
