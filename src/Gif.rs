@@ -47,30 +47,29 @@ impl Decoder {
             "89a" => {
                 let width = LittleEndian::read_u16(&contents[6..=7]);
                 let height = LittleEndian::read_u16(&contents[8..=9]);
-                let packed_byte = LittleEndian::read_u16(&contents[10..=11]);
-                let global_color_flag = (packed_byte & 0b1000_0000) != 0;
-                let color_resolution = (packed_byte & 0b0111_0000) as u8;
-                let sorted_flag = (packed_byte & 0b0000_1000) != 0;
-                let global_color_size = (packed_byte & 0b0000_0111) as u8;
+                let packed_field = LittleEndian::read_u16(&contents[10..=11]);
+                let global_color_flag = (packed_field & 0b1000_0000) != 0;
+                let color_resolution = (packed_field & 0b0111_0000) as u8;
+                let sorted_flag = (packed_field & 0b0000_1000) != 0;
+                let global_color_size = (packed_field & 0b0000_0111) as u8;
 
                 let background_color_index = LittleEndian::read_u16(&contents[12..=13]);
                 let pixel_aspect_ratio = LittleEndian::read_u16(&contents[14..=15]);
 
                 let mut offset: usize = 16;
-                let length: usize = 3 * usize::pow(2, (global_color_size + 1).into());
-
                 // Global Color Table
+                let length: usize = 3 * usize::pow(2, (global_color_size + 1).into());
                 let mut i: usize = offset;
-                let mut color_vector: Vec<Color> = Vec::new();
+                let mut global_color_vector: Vec<Color> = Vec::new();
 
                 while i < offset + length {
-                    color_vector.push(Color{ red: contents[i], green: contents[i+1], blue: contents[i+2], alpha: 255 });
+                    global_color_vector.push(Color{ red: contents[i], green: contents[i+1], blue: contents[i+2], alpha: 255 });
                     i = i + 3;
                 }
+                offset = offset + length;
                 // End
                 
                 // Graphic Control Extension
-                offset = offset + length;
                 let extension_introducer = LittleEndian::read_u16(&contents[offset..offset+2]);
                 if extension_introducer != 21 {
                     println!("Something went wrong here.")
@@ -98,11 +97,46 @@ impl Decoder {
                 let transparent_color_index = LittleEndian::read_u16(&contents[offset..offset+2]);
                 offset = offset + 2;
                 
-                let block_terminator = LittleEndian::read_u16(&contents[offset..offset+2]); // This must be "00"
+                let block_terminator = LittleEndian::read_u16(&contents[offset..offset+2]); // This must be 00
                 offset = offset + 2;
                 // End
                 
+                // Image Descriptor
+                let image_separator = LittleEndian::read_u16(&contents[offset..offset+2]); // This must be "2C" or 44
+                offset = offset + 2;
                 
+                let image_left = LittleEndian::read_u32(&contents[offset..offset+4]);
+                offset = offset + 4;
+                
+                let image_top = LittleEndian::read_u32(&contents[offset..offset+4]);
+                offset = offset + 4;
+                
+                let image_width = LittleEndian::read_u32(&contents[offset..offset+4]);
+                offset = offset + 4;
+                
+                let image_height = LittleEndian::read_u32(&contents[offset..offset+4]);
+                offset = offset + 4;
+                
+                let packed_field = LittleEndian::read_u16(&contents[offset..offset+2]);
+                let local_color_table_flag = (packed_field & 0b1000_0000) as u8;
+                let interface_flag = (packed_field & 0b0100_0000) as u8;
+                let sort_flag = (packed_field & 0b0010_0000) as u8;
+                // let _ = (packed_field & 0b0001_1000) as u8; // Future use
+                let local_color_table_size = (packed_field & 0b0000_0111) as u8;
+                offset = offset + 2;
+                // End
+
+                // Local Color Table
+                let length: usize = 3 * usize::pow(2, (local_color_table_size + 1).into());
+                let mut i: usize = offset;
+                let mut local_color_vector: Vec<Color> = Vec::new();
+
+                while i < offset + length {
+                    local_color_vector.push(Color{ red: contents[i], green: contents[i+1], blue: contents[i+2], alpha: 255 });
+                    i = i + 3;
+                }
+                offset = offset + length;
+                // End
             }
             "87a" => {}
             _ => {}
