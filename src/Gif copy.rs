@@ -1,9 +1,5 @@
 use byteorder::{ByteOrder, LittleEndian};
 use std::{collections::HashMap, fmt}; // 1.3.4
-mod DataHelper;
-use DataHelper::BitReader;
-use DataHelper::BitState;
-
 ///
 #[derive(Default)]
 pub struct Gif {
@@ -248,80 +244,96 @@ impl Decoder {
         let mut data_sub_blocks_count = contents[self.offset];
         self.increment_offset(1);
 
-        let mut index_stream: Vec<Option<u8>> = Vec::new();
+        // Initalize Code Table
+        /*
+        let mut original_code_table: Vec<CodeTable> = Vec::new();
+        if (local_color_table_flag) {
+            let length: u16 = 2 << local_color_table_size;
+            for n in 0..length {
+                let mut v: Vec<u16> = Vec::new();
+                v.push(n.into());
+                original_code_table.push(CodeTable::Color(v));
+            }
+            let total_length: u16 = lzw_minimum_code_size.into();
+            let total_length: u16 = 2 << total_length;
+            for n in length..total_length - length {
+                original_code_table.push(CodeTable::Empty);
+            }
+            original_code_table.push(CodeTable::Clear);
+            original_code_table.push(CodeTable::End);
+        } else if gif.lsd.global_color_flag {
+            let length: u16 = 2 << gif.lsd.global_color_size;
+            for n in 0..length {
+                let mut v: Vec<u16> = Vec::new();
+                v.push(n.into());
+                original_code_table.push(CodeTable::Color(v));
+            }
+            let total_length: u16 = lzw_minimum_code_size.into();
+            let total_length: u16 = 2 << total_length;
+            for n in length..total_length - length {
+                original_code_table.push(CodeTable::Empty);
+            }
+            original_code_table.push(CodeTable::Clear);
+            original_code_table.push(CodeTable::End);
+        }*/
+        // End of Code Table Initalization
 
-        let mut code_units: Vec<CodeUnit> = Vec::new();
+        // let mut code_table = original_code_table.to_vec();
+        // let code_stream: Vec<u16> = Vec::new();
+        // let mut last_code = 0;
+        // let mut size: usize = (lzw_minimum_code_size + 1).into();
+        // let mut grow_code: u16 = (2 << (lzw_minimum_code_size - 1)) - 1;
+        // // let mut previous_code: u8 = 0;
+        // let br = BitReader::new(bytes);
 
-        let mut code_table: Vec<Option<u8>> = Vec::new();
-
-        let mut code_stream: Vec<u8> = Vec::new();
-
-        let clear_code = 2 << (lzw_minimum_code_size - 1);
-        let eoi_code = clear_code + 1;
-
-        let mut last_code = eoi_code;
-        let mut size: usize = (lzw_minimum_code_size + 1).into();
-        let mut grow_code: u8 = (2 << (lzw_minimum_code_size - 1)) - 1;
-        // let mut previous_code: u8 = 0;
-        
-        let  mut is_initalized = false;
-
-        let mut br = BitReader::new();
+        /*
+                br.pushBytes(this.dv.slice(offset, length));
+            while (br.hasBits(size)) {
+                let codeStart = br.getState();
+                let code = br.readBits(size);
+                if (code === eoiCode) {
+                    codeStream.push(code);
+                    break;
+                } else if (code === clearCode) {
+                    codeUnits.push({ stream: [], table: [], start: codeStart });
+                    codeStream = codeUnits[codeUnits.length - 1].stream;
+                    codeTable = codeUnits[codeUnits.length - 1].table;
+                    for (let i = 0; i <= eoiCode; i++) {
+                        codeTable[i] = (i < clearCode) ? [i] : [];
+                    }
+                    lastCode = eoiCode;
+                    size = lzwmin + 1;
+                    growCode = (2 << size - 1) - 1;
+                    isInitialized = false;
+                } else if (!isInitialized) {
+                    indexStream.push(...codeTable[code]);
+                    isInitialized = true;
+                } else {
+                    let k = 0;
+                    const prevCode = codeStream[codeStream.length - 1];
+                    if (code <= lastCode) {
+                        indexStream.push(...codeTable[code]);
+                        // eslint-disable-next-line prefer-destructuring
+                        k = codeTable[code][0];
+                    } else {
+                        // eslint-disable-next-line prefer-destructuring
+                        k = codeTable[prevCode][0];
+                        indexStream.push(...codeTable[prevCode], k);
+                    }
+                    if (lastCode < 0xFFF) {
+                        lastCode += 1;
+                        codeTable[lastCode] = [...codeTable[prevCode], k];
+                        if (lastCode === growCode && lastCode < 0xFFF) {
+                            size += 1;
+                            growCode = (2 << size - 1) - 1;
+                        }
+                    }
+                }
+                codeStream.push(code);
+            } */
         loop {
             while data_sub_blocks_count > 0 {
                 let content = contents[self.offset];
-                br.pushByte(content);
-                loop {
-                    let code_start = br.get_state();
-                    let code = br.readBits(size);
-                    if (code == eoi_code) {
-                        code_stream.push(code);
-                        break;
-                    } else if (code == clear_code) {
-                        code_units.push(CodeUnit{stream: Vec::new(), table: Vec::new(), start: code_start});
-                        code_stream = code_units[code_units.len() - 1].stream;
-                        code_table = code_units[code_units.len() - 1].table;
-                        for n in 0..eoi_code {
-                            if n < clear_code {
-                                code_table[n.into()] = Ok(n);
-                            } else {
-                                code_table[n.into()] = None;
-                            }
-                        }
-                        last_code = eoi_code;
-                        size = (lzw_minimum_code_size + 1).into();
-                        grow_code = (2 << size - 1) - 1;
-                        is_initalized = false;
-                        
-                    }  else if (!is_initalized) {
-                        index_stream.push(...codeTable[code]);
-                        is_initalized = true;
-                    }
-                    else {
-                        let k = 0;
-                        let prev_code = code_stream[code_stream.len() - 1];
-                        if (code <= last_code) {
-                            index_stream.push(code_table[code.into()]);
-                            k = code_table[code.into()];
-                        } else {
-                            // eslint-disable-next-line prefer-destructuring
-                            k = code_table[prev_code.into()];
-                            index_stream.push(code_table[prev_code.into()]);
-                            index_stream.push(k);
-                        }
-                        if (last_code < 0xFFF) {
-                            last_code += 1;
-                            code_table[last_code.into()] = [code_table[prev_code], k];
-                            if (last_code == grow_code && last_code < 0xFFF) {
-                                size += 1;
-                                grow_code = (2 << size - 1) - 1;
-                            }
-                        }
-                    }
-                    if !br.hasBits(size) {
-                        break;
-                    }
-                }
                 self.increment_offset(1);
                 data_sub_blocks_count -= 1;
             }
@@ -403,13 +415,6 @@ impl Decoder {
 
 ///
 
-struct CodeUnit {
-    stream: Vec<u8>,
-    table: Vec<Option<u8>>,
-    start: BitState
-}
-///
-
 #[derive(Debug)]
 pub enum GifError {
     SignatureError,
@@ -424,3 +429,88 @@ impl fmt::Display for GifError {
         }
     }
 }
+/*
+// https://www.matthewflickinger.com/lab/whatsinagif/scripts/data_helpers.js
+pub struct BitReader {
+    bytes: Vec<u8>,
+    byteOffset: usize,
+    bitOffset: usize,
+    totalByteOffset: usize,
+}
+impl BitReader {
+    pub fn new() -> Self {
+        Self { bytes: Vec::new(), byteOffset: 0, bitOffset: 0, totalByteOffset: 0 }
+    }
+    pub fn readBits(&mut self, len: usize) -> u8 {
+        let mut result = 0;
+        let mut rbits: usize = 0;
+        while rbits < len {
+            if self.byteOffset >= self.bytes.len() {
+                // throw new Error(`Not enough bytes to read ${len} bits (read ${rbits} bits)`);
+            }
+            let bbits = std::cmp::min(8 - self.bitOffset, len - rbits);
+            let mask = (0xFF >> (8 - bbits)) << self.bitOffset;
+            result += ((self.bytes[self.byteOffset] & mask) >> self.bitOffset) << rbits;
+            rbits += bbits;
+            self.bitOffset += bbits;
+            if (self.bitOffset == 8) {
+                self.byteOffset += 1;
+                self.totalByteOffset += 1;
+                self.bitOffset = 0;
+            }
+        }
+        result
+    }
+
+    pub fn hasBits(&mut self, len: usize) -> bool {
+        if (len > 12) {
+            // throw new Error(`Exceeds max bit size: ${len} (max: 12)`);
+        }
+        if self.byteOffset >= self.bytes.len() {
+            return false;
+        }
+        let bitsRemain = 8 - self.bitOffset;
+        if len <= bitsRemain {
+            return true;
+        }
+        let bytesRemain = self.bytes.len() - self.byteOffset - 1;
+        if bytesRemain < 1 {
+            return false;
+        }
+        if len > bitsRemain + 8 * bytesRemain {
+            return false;
+        }
+        return true;
+    }
+
+    pub fn setBytes(&mut self, bytes: Vec<u8>, byteOffset: usize, bitOffset: usize) {
+        self.bytes = bytes;
+        self.byteOffset = byteOffset;
+        self.bitOffset = bitOffset;
+    }
+
+    pub fn pushBytes(&mut self, bytes: &mut Vec<u8>) {
+        if (self.hasBits(0)) {
+            let mut extended: Vec<u8> = self.bytes.as_slice()[self.byteOffset + 1..self.bytes.len()].to_vec();
+            extended.append(bytes);
+            self.bytes = extended;
+            self.byteOffset = 0;
+        } else {
+            self.bytes = bytes.to_vec();
+            self.byteOffset = 0;
+            self.bitOffset = 0;
+        }
+    }
+
+    pub fn getState(&mut self) -> BitState {
+        BitState {
+            bitOffset: self.bitOffset,
+            byteOffset: self.totalByteOffset,
+        }
+    }
+}
+struct BitState {
+    bitOffset: usize,
+    byteOffset: usize,
+}
+*/
