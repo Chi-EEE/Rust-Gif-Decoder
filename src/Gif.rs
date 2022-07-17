@@ -1,8 +1,8 @@
 use byteorder::{ByteOrder, LittleEndian};
+use std::process::exit;
 use std::{collections::HashMap, fmt}; // 1.3.4
 mod DataHelper;
 use DataHelper::BitReader;
-use DataHelper::BitState;
 
 ///
 #[derive(Default)]
@@ -75,7 +75,7 @@ pub struct Decoder {
 }
 
 impl Decoder {
-    pub fn decode(&mut self, file_path: &str) -> Result<(), GifError> {
+    pub fn decode(&mut self, file_path: &str) -> Result<(), ()> {
         let contents = std::fs::read(file_path).expect("Something went wrong reading the file");
 
         let mut contents = contents.as_slice();
@@ -88,7 +88,7 @@ impl Decoder {
                 Err(err) => println!("Error 1: {}", err),
             }
             if signature != "GIF" {
-                return Err(GifError::SignatureError);
+                // return Err(GifError::SignatureError);
             }
         }
 
@@ -122,28 +122,33 @@ impl Decoder {
         self.increment_offset(length);
         // End
         loop {
-            let extension_introducer = contents[self.offset];
-            if extension_introducer != 0x21 && extension_introducer == 0x3B {
+            let introducer = contents[self.offset];
+            if introducer != 0x21 && introducer == 0x3B {
                 break;
             }
-            println!("Offset: {}", self.offset);
             self.increment_offset(1);
+            println!("Offset: {}", self.offset);
 
+            if introducer == 0x2C {
+                // Image Descriptor
+                self.handle_image_descriptor(&mut gif, contents);
+                continue;
+            }
             let label = contents[self.offset];
             self.increment_offset(1);
             match label {
                 0xF9 => {
                     self.handle_graphic_control_extension(&mut gif, contents);
-                }
+                },
                 0x01 => {
                     self.handle_plain_text_extension(&mut gif, contents);
-                }
+                },
                 0xFF => {
                     self.handle_application_extension(&mut gif, contents);
-                }
+                },
                 0xFE => {
                     self.handle_comment_extension(&mut gif, contents);
-                }
+                },
                 _ => {}
             }
         }
@@ -154,13 +159,17 @@ impl Decoder {
     fn increment_offset(&mut self, amount: usize) {
         self.offset += amount;
     }
-    fn shl_or(&mut self, val: u8, shift: usize, def: u8) -> u8 {
-        [val << (shift & 7), def][((shift & !7) != 0) as usize]
+    fn shl_or(&mut self, val: u16, shift: usize, def: u16) -> u16 {
+        [val << (shift & 15), def][((shift & !7) != 0) as usize]
     }
     fn shr_or(&mut self, val: u8, shift: usize, def: u8) -> u8 {
         [val >> (shift & 7), def][((shift & !7) != 0) as usize]
     }
     fn handle_logical_screen_descriptor(&mut self, gif: &mut Gif, contents: &[u8]) {
+        // Logic Screen Descriptor
+        #[cfg(debug_assertions)]
+        println!("Logic Screen Descriptor Offset: {}", self.offset);
+
         gif.lsd.width = LittleEndian::read_u16(&contents[6..8]); // width
         gif.lsd.height = LittleEndian::read_u16(&contents[8..10]); // height
 
@@ -176,6 +185,9 @@ impl Decoder {
     }
     fn handle_graphic_control_extension(&mut self, gif: &mut Gif, contents: &[u8]) {
         // Graphical Control Extension
+        #[cfg(debug_assertions)]
+        println!("Graphic Control Extension Offset: {}", self.offset);
+
         let byte_size = contents[self.offset];
         self.increment_offset(1);
 
@@ -195,10 +207,11 @@ impl Decoder {
         let block_terminator = contents[self.offset]; // This must be 00
         self.increment_offset(1);
         // End
-
+    }
+    fn handle_image_descriptor(&mut self, gif: &mut Gif, contents: &[u8]) {
         // Image Descriptor
-        let image_separator = contents[self.offset]; // This must be "2C" or 44
-        self.increment_offset(1);
+        #[cfg(debug_assertions)]
+        println!("Image Descriptor Offset: {}", self.offset);
 
         let image_left = LittleEndian::read_u16(&contents[self.offset..self.offset + 2]);
         self.increment_offset(2);
@@ -237,10 +250,17 @@ impl Decoder {
                 i = i + 3;
             }
             self.increment_offset(length);
+            println!(
+                "End of local color table: {}, Length: {}",
+                self.offset, length
+            );
         }
         // End
 
         // Image Data
+        #[cfg(debug_assertions)]
+        println!("Image Data Offset: {}", self.offset);
+
         let lzw_minimum_code_size = contents[self.offset];
         self.increment_offset(1);
 
@@ -248,83 +268,122 @@ impl Decoder {
         let mut data_sub_blocks_count = contents[self.offset];
         self.increment_offset(1);
 
-        let mut index_stream: Vec<Option<u8>> = Vec::new();
+        let mut index_stream: Vec<u8> = Vec::new();
 
-        let mut code_units: Vec<CodeUnit> = Vec::new();
+        let mut code_table: HashMap<usize, Vec<u8>> = HashMap::new();
+        let mut code_stream: Vec<u16> = Vec::new();
 
-        let mut code_table: Vec<Option<u8>> = Vec::new();
-
-        let mut code_stream: Vec<u8> = Vec::new();
-
-        let clear_code = 2 << (lzw_minimum_code_size - 1);
+        let clear_code = self.shl_or(2, (lzw_minimum_code_size - 1).into(), 0);
         let eoi_code = clear_code + 1;
 
         let mut last_code = eoi_code;
         let mut size: usize = (lzw_minimum_code_size + 1).into();
-        let mut grow_code: u8 = (2 << (lzw_minimum_code_size - 1)) - 1;
-        // let mut previous_code: u8 = 0;
-        
-        let  mut is_initalized = false;
+        let mut grow_code = clear_code - 1;
+
+        let mut is_initalized = false;
 
         let mut br = BitReader::new();
         loop {
-            while data_sub_blocks_count > 0 {
-                let content = contents[self.offset];
-                br.pushByte(content);
-                loop {
-                    let code_start = br.get_state();
-                    let code = br.readBits(size);
-                    if (code == eoi_code) {
-                        code_stream.push(code);
-                        break;
-                    } else if (code == clear_code) {
-                        code_units.push(CodeUnit{stream: Vec::new(), table: Vec::new(), start: code_start});
-                        code_stream = code_units[code_units.len() - 1].stream;
-                        code_table = code_units[code_units.len() - 1].table;
-                        for n in 0..eoi_code {
-                            if n < clear_code {
-                                code_table[n.into()] = Ok(n);
-                            } else {
-                                code_table[n.into()] = None;
-                            }
-                        }
-                        last_code = eoi_code;
-                        size = (lzw_minimum_code_size + 1).into();
-                        grow_code = (2 << size - 1) - 1;
-                        is_initalized = false;
-                        
-                    }  else if (!is_initalized) {
-                        index_stream.push(...codeTable[code]);
-                        is_initalized = true;
+            let offset_add: usize = self.offset + data_sub_blocks_count as usize;
+            let sliced_bytes = &contents[self.offset..offset_add];
+
+            br.push_bytes(&sliced_bytes);
+            loop {
+                let code = match br.read_bits(size) {
+                    Ok(bits) => bits,
+                    Err(err) => {
+                        println!("{}", err);
+                        exit(0x0);
                     }
-                    else {
-                        let k = 0;
-                        let prev_code = code_stream[code_stream.len() - 1];
-                        if (code <= last_code) {
-                            index_stream.push(code_table[code.into()]);
-                            k = code_table[code.into()];
+                };
+                if code == eoi_code {
+                    code_stream.push(code);
+                    break;
+                } else if code == clear_code {
+                    code_stream = Vec::new();
+                    code_table = HashMap::new();
+                    for n in 0..eoi_code {
+                        if n < clear_code {
+                            code_table.insert(n as usize, vec![n as u8]);
                         } else {
-                            // eslint-disable-next-line prefer-destructuring
-                            k = code_table[prev_code.into()];
-                            index_stream.push(code_table[prev_code.into()]);
-                            index_stream.push(k);
-                        }
-                        if (last_code < 0xFFF) {
-                            last_code += 1;
-                            code_table[last_code.into()] = [code_table[prev_code], k];
-                            if (last_code == grow_code && last_code < 0xFFF) {
-                                size += 1;
-                                grow_code = (2 << size - 1) - 1;
-                            }
+                            code_table.insert(n as usize, vec![]);
                         }
                     }
-                    if !br.hasBits(size) {
-                        break;
+                    last_code = eoi_code;
+                    size = (lzw_minimum_code_size + 1).into();
+                    grow_code = (2 << size - 1) - 1;
+                    is_initalized = false;
+                } else if !is_initalized {
+                    match code_table.get(&(code as usize)) {
+                        Some(codes) => {
+                            index_stream.extend(codes);
+                        },
+                        None => {
+                            println!("invalid code");
+                            exit(1);
+                        },
+                    }
+                    is_initalized = true;
+                } else {
+                    let mut k: u8 = 0;
+                    let prev_code = code_stream[code_stream.len() - 1];
+                    if code <= last_code {
+                        match code_table.get(&(code as usize)) {
+                            Some(codes) => {
+                                index_stream.extend(codes);
+                                k = codes[0];
+                            },
+                            None => {
+                                println!("invalid code");
+                                exit(2);
+                            },
+                        }
+                    } else {
+                        match code_table.get(&(prev_code as usize)) {
+                            Some(codes) => {
+                                k = codes[0];
+                                index_stream.extend(codes);
+                                index_stream.push(k);
+                            },
+                            None => {
+                                println!("invalid code");
+                                exit(3);
+                            },
+                        }
+                    }
+                    if last_code < 0xFFF {
+                        match code_table.get(&(prev_code as usize)) {
+                            Some(codes) => {
+                                last_code += 1;
+                                let mut last_code_table = codes.to_vec();
+                                last_code_table.push(k);
+                                code_table.insert(last_code as usize, last_code_table);
+                                if last_code == grow_code && last_code < 0xFFF {
+                                    size += 1;
+                                    grow_code = (2 << size - 1) - 1;
+                                }
+                            },
+                            None => {
+                                println!("invalid code");
+                                exit(4);
+                            },
+                        }
                     }
                 }
-                self.increment_offset(1);
-                data_sub_blocks_count -= 1;
+                code_stream.push(code);
+                let has_bits = match br.has_bits(size) {
+                    Ok(has_bits) => has_bits,
+                    Err(err) => {
+                        println!("{}", err);
+                        exit(0x0);
+                    }
+                };
+                if !has_bits {
+                    break;
+                }
             }
+
+            self.offset = offset_add;
             data_sub_blocks_count = contents[self.offset];
             self.increment_offset(1);
             if data_sub_blocks_count == 0 {
@@ -334,6 +393,9 @@ impl Decoder {
     }
     fn handle_plain_text_extension(&mut self, gif: &mut Gif, contents: &[u8]) {
         // Plain Text Extension (Optional)
+        #[cfg(debug_assertions)]
+        println!("Plain Text Extension Offset: {}", self.offset);
+
         let block_size: usize = contents[self.offset].into();
         self.increment_offset(1 + block_size);
 
@@ -355,6 +417,9 @@ impl Decoder {
     }
     fn handle_application_extension(&mut self, gif: &mut Gif, contents: &[u8]) {
         // Application Extension (Optional)
+        #[cfg(debug_assertions)]
+        println!("Application Extension Offset: {}", self.offset);
+
         let block_size: usize = contents[self.offset].into();
         self.increment_offset(1);
 
@@ -385,6 +450,9 @@ impl Decoder {
     }
     fn handle_comment_extension(&mut self, gif: &mut Gif, contents: &[u8]) {
         // Comment Extension (Optional)
+        #[cfg(debug_assertions)]
+        println!("Comment Extension Offset: {}", self.offset);
+
         let mut data_sub_blocks_count = contents[self.offset];
         self.increment_offset(1);
         loop {
@@ -403,24 +471,33 @@ impl Decoder {
 
 ///
 
-struct CodeUnit {
-    stream: Vec<u8>,
-    table: Vec<Option<u8>>,
-    start: BitState
-}
-///
-
-#[derive(Debug)]
-pub enum GifError {
-    SignatureError,
+pub struct ByteSizeError {
+    len: usize,
+    rbits: Option<usize>,
+    file: &'static str,
+    line: u32,
+    column: u32,
 }
 
-impl std::error::Error for GifError {}
-
-impl fmt::Display for GifError {
+impl fmt::Display for ByteSizeError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            GifError::SignatureError => write!(f, "Signature Error"),
-        }
+        let err_msg = match self.rbits {
+            Some(rbits) => format!(
+                "Not enough bytes to read {} bits (read {} bits) --> {}:{}:{}",
+                self.len,
+                rbits,
+                self.file,
+                self.line,
+                self.column
+            ),
+            None => format!(
+                "Exceeds max bit size: ${} (max: 12) --> {}:{}:{}",
+                self.len,
+                self.file,
+                self.line,
+                self.column
+            ),
+        };
+        write!(f, "{}", err_msg)
     }
 }
