@@ -2,8 +2,11 @@ mod Gif;
 
 fn main() -> std::io::Result<()> {
     match Gif::Decoder::decode("./gifs/shake.gif") {
-        Ok(gif) => {
-            println!("{:?}", gif.version);
+        Ok(mut gif) => {
+            let buffers = gif.process_frames();
+            for buffer in buffers.into_iter() {
+                println!("{:?}", buffer);
+            }
         },
         Err(_) => {},
     };

@@ -1,6 +1,6 @@
 use byteorder::{ByteOrder, LittleEndian};
 use std::process::exit;
-use std::{collections::HashMap, fmt};
+use std::{collections::HashMap};
 mod DataHelper;
 use DataHelper::BitReader;
 
@@ -9,11 +9,44 @@ use DataHelper::BitReader;
 pub struct Gif {
     pub version: String,
     pub lsd: LogicalScreenDescriptor,
-    pub global_table: Option<Vec<Color>>,
-    pub frames: Vec<ParsedFrame>,
+    pub global_table: Vec<Color>,
+    pub frames: Vec<Frame>,
 }
 impl Gif {
-    // fn example(&mut self) {}
+    pub fn process_frames(&mut self) -> Vec<Vec<u8>> {
+        let mut buffers: Vec<Vec<u8>> = Vec::new();
+        let frames_iter = self.frames.iter();
+        for frame in frames_iter {
+            let mut buffer: Vec<u8> = Vec::new();
+            if (frame.im.local_color_table_flag) {
+                for index in (&frame.index_stream).into_iter() {
+                    let color = frame.local_table.get(*index as usize).unwrap();
+                    buffer.push(color.red);
+                    buffer.push(color.green);
+                    buffer.push(color.blue);
+                    if frame.gcd.transparent_color_flag && index == (&frame.gcd.transparent_color_index) {
+                        buffer.push(0);
+                    } else {
+                        buffer.push(255);
+                    }
+                }
+            } else {
+                for index in (&frame.index_stream).into_iter() {
+                    let color = self.global_table.get(*index as usize).unwrap();
+                    buffer.push(color.red);
+                    buffer.push(color.green);
+                    buffer.push(color.blue);
+                    if frame.gcd.transparent_color_flag && index == (&frame.gcd.transparent_color_index) {
+                        buffer.push(0);
+                    } else {
+                        buffer.push(255);
+                    }
+                }
+            }
+            buffers.push(buffer);
+        }
+        return buffers;
+    }
 }
 
 #[derive(Default)]
@@ -33,6 +66,15 @@ pub struct ParsedFrame {
     pub gcd: GraphicsControlExtension,
     pub im: ImageDescriptor,
     pub local_table: Option<Vec<Color>>,
+    pub buffer: Vec<u8>,
+}
+
+#[derive(Default)]
+pub struct Frame {
+    pub gcd: GraphicsControlExtension,
+    pub im: ImageDescriptor,
+    pub local_table: Vec<Color>,
+    pub(crate) index_stream: Vec<u8>,
 }
 
 #[derive(Default)]
@@ -114,7 +156,7 @@ impl Decoder {
                 i = i + 3;
             }
             Self::increment_offset(&mut offset, length);
-            gif.global_table = Some(global_color_vector);
+            gif.global_table = global_color_vector;
         }
         // End
         loop {
@@ -179,7 +221,7 @@ impl Decoder {
         #[cfg(debug_assertions)]
         println!("Graphic Control Extension Offset: {}", *offset);
 
-        let mut parsed_frame: ParsedFrame = ParsedFrame::default();
+        let mut parsed_frame: Frame = Frame::default();
 
         let byte_size = contents[*offset];
         Self::increment_offset(offset, 1);
@@ -248,9 +290,7 @@ impl Decoder {
             }
             Self::increment_offset(offset, length);
             println!("End of local color table: {}, Length: {}", *offset, length);
-            parsed_frame.local_table = Some(local_color_vector);
-        } else {
-            parsed_frame.local_table = None;
+            parsed_frame.local_table = local_color_vector;
         }
         // End
 
@@ -387,6 +427,7 @@ impl Decoder {
                 break;
             }
         }
+        parsed_frame.index_stream = index_stream;
     }
     fn handle_plain_text_extension(offset: &mut usize, gif: &mut Gif, contents: &[u8]) {
         // Plain Text Extension (Optional)
