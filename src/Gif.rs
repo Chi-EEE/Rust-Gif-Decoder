@@ -1,66 +1,59 @@
 use byteorder::{ByteOrder, LittleEndian};
 use std::process::exit;
-use std::{collections::HashMap, fmt}; // 1.3.4
+use std::{collections::HashMap, fmt};
 mod DataHelper;
 use DataHelper::BitReader;
 
 ///
 #[derive(Default)]
 pub struct Gif {
-    version: String,
-    lsd: LogicalScreenDescriptor,
-    global_table: Option<Vec<Color>>,
-    frames: Vec<ParsedFrame>,
+    pub version: String,
+    pub lsd: LogicalScreenDescriptor,
+    pub global_table: Option<Vec<Color>>,
+    pub frames: Vec<ParsedFrame>,
 }
 impl Gif {
     // fn example(&mut self) {}
 }
 
 #[derive(Default)]
-pub(crate) struct LogicalScreenDescriptor {
-    width: u16,
-    height: u16,
-    global_color_flag: bool,
-    color_resolution: u8,
-    sorted_flag: bool,
-    global_color_size: u8,
-    background_color_index: u8,
-    pixel_aspect_ratio: u8,
+pub struct LogicalScreenDescriptor {
+    pub width: u16,
+    pub height: u16,
+    pub global_color_flag: bool,
+    pub color_resolution: u8,
+    pub sorted_flag: bool,
+    pub global_color_size: u8,
+    pub background_color_index: u8,
+    pub pixel_aspect_ratio: u8,
 }
 
 #[derive(Default)]
-struct ParsedFrame {
-    gcd: GraphicsControlExtension,
-    im: ImageDescriptor,
+pub struct ParsedFrame {
+    pub gcd: GraphicsControlExtension,
+    pub im: ImageDescriptor,
+    pub local_table: Option<Vec<Color>>,
 }
 
 #[derive(Default)]
-pub(crate) struct ImageDescriptor {
-    left: u16,
-    top: u16,
-    width: u16,
-    height: u16,
-    local_color_table_flag: bool,
-    interface_flag: bool,
-    sort_flag: bool,
-    local_color_table_size: u16,
+pub struct ImageDescriptor {
+    pub left: u16,
+    pub top: u16,
+    pub width: u16,
+    pub height: u16,
+    pub local_color_table_flag: bool,
+    pub interface_flag: bool,
+    pub sort_flag: bool,
+    pub local_color_table_size: u8,
 }
 
 #[derive(Default)]
-pub(crate) struct GraphicsControlExtension {
-    disposal_method: u8,
-    user_input_flag: bool,
-    transparent_color_flag: bool,
-    delay_time: u16,
-    transparent_color_index: u8,
-}
-
-#[derive(Clone)]
-enum CodeTable {
-    Color(Vec<u16>),
-    Empty,
-    Clear,
-    End,
+pub struct GraphicsControlExtension {
+    pub disposal_method: u8,
+    pub user_input_flag: bool,
+    pub transparent_color_flag: bool,
+    pub delay_time: u16,
+    pub transparent_color_index: u8,
 }
 
 pub struct Color {
@@ -70,12 +63,10 @@ pub struct Color {
     pub alpha: u8,
 }
 ///
-pub struct Decoder {
-    pub offset: usize,
-}
+pub(crate) struct Decoder {}
 
 impl Decoder {
-    pub fn decode(&mut self, file_path: &str) -> Result<(), ()> {
+    pub fn decode(file_path: &str) -> Result<Gif, ()> {
         let contents = std::fs::read(file_path).expect("Something went wrong reading the file");
 
         let mut contents = contents.as_slice();
@@ -88,7 +79,7 @@ impl Decoder {
                 Err(err) => println!("Error 1: {}", err),
             }
             if signature != "GIF" {
-                // return Err(GifError::SignatureError);
+                return Err(());
             }
         }
 
@@ -102,73 +93,73 @@ impl Decoder {
         }
         gif.version = version;
 
-        self.handle_logical_screen_descriptor(&mut gif, contents);
+        Self::handle_logical_screen_descriptor(&mut gif, contents);
 
-        self.offset = 13;
+        let mut offset: usize = 13;
+
         // Global Color Table
         let length: usize = 3 * 2 << gif.lsd.global_color_size;
-        let mut i: usize = self.offset;
-        let mut global_color_vector: Vec<Color> = Vec::new();
+        let mut i: usize = offset;
 
-        while i < self.offset + length {
-            global_color_vector.push(Color {
-                red: contents[i],
-                green: contents[i + 1],
-                blue: contents[i + 2],
-                alpha: 255,
-            });
-            i = i + 3;
+        if gif.lsd.global_color_flag {
+            let mut global_color_vector: Vec<Color> = Vec::new();
+
+            while i < offset + length {
+                global_color_vector.push(Color {
+                    red: contents[i],
+                    green: contents[i + 1],
+                    blue: contents[i + 2],
+                    alpha: 255,
+                });
+                i = i + 3;
+            }
+            Self::increment_offset(&mut offset, length);
+            gif.global_table = Some(global_color_vector);
         }
-        self.increment_offset(length);
         // End
         loop {
-            let introducer = contents[self.offset];
-            if introducer != 0x21 && introducer == 0x3B {
+            let introducer = contents[offset];
+            if introducer == 0x3B {
                 break;
             }
-            self.increment_offset(1);
-            println!("Offset: {}", self.offset);
-
+            Self::increment_offset(&mut offset, 1);
             if introducer == 0x2C {
                 // Image Descriptor
-                self.handle_image_descriptor(&mut gif, contents);
+                Self::handle_image_descriptor(&mut offset, &mut gif, contents);
                 continue;
             }
-            let label = contents[self.offset];
-            self.increment_offset(1);
+            let label = contents[offset];
+            Self::increment_offset(&mut offset, 1);
             match label {
                 0xF9 => {
-                    self.handle_graphic_control_extension(&mut gif, contents);
-                },
+                    Self::handle_graphic_control_extension(&mut offset, &mut gif, contents);
+                }
                 0x01 => {
-                    self.handle_plain_text_extension(&mut gif, contents);
-                },
+                    Self::handle_plain_text_extension(&mut offset, &mut gif, contents);
+                }
                 0xFF => {
-                    self.handle_application_extension(&mut gif, contents);
-                },
+                    Self::handle_application_extension(&mut offset, &mut gif, contents);
+                }
                 0xFE => {
-                    self.handle_comment_extension(&mut gif, contents);
-                },
+                    Self::handle_comment_extension(&mut offset, &mut gif, contents);
+                }
                 _ => {}
             }
         }
         // Trailer
         println!("End of file.");
-        return Ok(());
+        return Ok(gif);
     }
-    fn increment_offset(&mut self, amount: usize) {
-        self.offset += amount;
+    fn increment_offset(offset: &mut usize, amount: usize) {
+        *offset += amount;
     }
-    fn shl_or(&mut self, val: u16, shift: usize, def: u16) -> u16 {
+    fn shl_or(offset: &mut usize, val: u16, shift: usize, def: u16) -> u16 {
         [val << (shift & 15), def][((shift & !7) != 0) as usize]
     }
-    fn shr_or(&mut self, val: u8, shift: usize, def: u8) -> u8 {
-        [val >> (shift & 7), def][((shift & !7) != 0) as usize]
-    }
-    fn handle_logical_screen_descriptor(&mut self, gif: &mut Gif, contents: &[u8]) {
+    fn handle_logical_screen_descriptor(gif: &mut Gif, contents: &[u8]) {
         // Logic Screen Descriptor
         #[cfg(debug_assertions)]
-        println!("Logic Screen Descriptor Offset: {}", self.offset);
+        println!("Logic Screen Descriptor Offset: {}", 6);
 
         gif.lsd.width = LittleEndian::read_u16(&contents[6..8]); // width
         gif.lsd.height = LittleEndian::read_u16(&contents[8..10]); // height
@@ -183,64 +174,70 @@ impl Decoder {
         gif.lsd.background_color_index = contents[11]; // background_color_index
         gif.lsd.pixel_aspect_ratio = contents[12]; // pixel_aspect_ratio
     }
-    fn handle_graphic_control_extension(&mut self, gif: &mut Gif, contents: &[u8]) {
+    fn handle_graphic_control_extension(offset: &mut usize, gif: &mut Gif, contents: &[u8]) {
         // Graphical Control Extension
         #[cfg(debug_assertions)]
-        println!("Graphic Control Extension Offset: {}", self.offset);
+        println!("Graphic Control Extension Offset: {}", *offset);
 
-        let byte_size = contents[self.offset];
-        self.increment_offset(1);
+        let mut parsed_frame: ParsedFrame = ParsedFrame::default();
 
-        let packed_field = contents[self.offset];
-        let disposal_method = (packed_field & 0b0001_1100) as u8;
-        let user_input_flag = (packed_field & 0b0000_0010) != 0;
-        let transparent_color_flag = (packed_field & 0b0000_0001) != 0;
-        self.increment_offset(1);
+        let byte_size = contents[*offset];
+        Self::increment_offset(offset, 1);
 
-        let delay_time = LittleEndian::read_u16(&contents[self.offset..self.offset + 2]);
-        self.increment_offset(2);
+        let packed_field = contents[*offset];
+        parsed_frame.gcd.disposal_method = (packed_field & 0b0001_1100) as u8;
+        parsed_frame.gcd.user_input_flag = (packed_field & 0b0000_0010) != 0;
+        parsed_frame.gcd.transparent_color_flag = (packed_field & 0b0000_0001) != 0;
+        Self::increment_offset(offset, 1);
 
-        let transparent_color_index = contents[self.offset];
-        println!("{}", transparent_color_index);
-        self.increment_offset(1);
+        parsed_frame.gcd.delay_time = LittleEndian::read_u16(&contents[*offset..*offset + 2]);
+        Self::increment_offset(offset, 2);
 
-        let block_terminator = contents[self.offset]; // This must be 00
-        self.increment_offset(1);
+        parsed_frame.gcd.transparent_color_index = contents[*offset];
+        Self::increment_offset(offset, 1);
+
+        let block_terminator = contents[*offset]; // This must be 00 ///////////////////////////////////////////////////////////////////
+        Self::increment_offset(offset, 1);
         // End
+
+        gif.frames.push(parsed_frame);
     }
-    fn handle_image_descriptor(&mut self, gif: &mut Gif, contents: &[u8]) {
+    fn handle_image_descriptor(offset: &mut usize, gif: &mut Gif, contents: &[u8]) {
         // Image Descriptor
         #[cfg(debug_assertions)]
-        println!("Image Descriptor Offset: {}", self.offset);
+        println!("Image Descriptor Offset: {}", *offset);
 
-        let image_left = LittleEndian::read_u16(&contents[self.offset..self.offset + 2]);
-        self.increment_offset(2);
+        let frame_index = gif.frames.len() - 1;
+        let mut parsed_frame = &mut gif.frames[frame_index];
 
-        let image_top = LittleEndian::read_u16(&contents[self.offset..self.offset + 2]);
-        self.increment_offset(2);
+        parsed_frame.im.left = LittleEndian::read_u16(&contents[*offset..*offset + 2]); // image_left
+        Self::increment_offset(offset, 2);
 
-        let image_width = LittleEndian::read_u16(&contents[self.offset..self.offset + 2]);
-        self.increment_offset(2);
+        parsed_frame.im.top = LittleEndian::read_u16(&contents[*offset..*offset + 2]); // image_top
+        Self::increment_offset(offset, 2);
 
-        let image_height = LittleEndian::read_u16(&contents[self.offset..self.offset + 2]);
-        self.increment_offset(2);
+        parsed_frame.im.width = LittleEndian::read_u16(&contents[*offset..*offset + 2]); // image_width
+        Self::increment_offset(offset, 2);
 
-        let packed_field = contents[self.offset];
-        let local_color_table_flag = (packed_field & 0b1000_0000) != 0;
-        let interface_flag = (packed_field & 0b0100_0000) != 0;
-        let sort_flag = (packed_field & 0b0010_0000) != 0;
+        parsed_frame.im.height = LittleEndian::read_u16(&contents[*offset..*offset + 2]); // image_height
+        Self::increment_offset(offset, 2);
+
+        let packed_field = contents[*offset];
+        parsed_frame.im.local_color_table_flag = (packed_field & 0b1000_0000) != 0;
+        parsed_frame.im.interface_flag = (packed_field & 0b0100_0000) != 0;
+        parsed_frame.im.sort_flag = (packed_field & 0b0010_0000) != 0;
         // let _ = (packed_field & 0b0001_1000) as u8; // Future use
-        let local_color_table_size = (packed_field & 0b0000_0111) as u8;
-        self.increment_offset(1);
+        parsed_frame.im.local_color_table_size = (packed_field & 0b0000_0111) as u8;
+        Self::increment_offset(offset, 1);
         // End
 
         // Local Color Table
-        if (local_color_table_flag) {
-            let length: usize = 3 * 2 << local_color_table_size;
-            let mut i: usize = self.offset;
+        if (parsed_frame.im.local_color_table_flag) {
+            let length: usize = 3 * 2 << parsed_frame.im.local_color_table_size;
+            let mut i: usize = *offset;
             let mut local_color_vector: Vec<Color> = Vec::new();
 
-            while i < self.offset + length {
+            while i < *offset + length {
                 local_color_vector.push(Color {
                     red: contents[i],
                     green: contents[i + 1],
@@ -249,32 +246,39 @@ impl Decoder {
                 });
                 i = i + 3;
             }
-            self.increment_offset(length);
-            println!(
-                "End of local color table: {}, Length: {}",
-                self.offset, length
-            );
+            Self::increment_offset(offset, length);
+            println!("End of local color table: {}, Length: {}", *offset, length);
+            parsed_frame.local_table = Some(local_color_vector);
+        } else {
+            parsed_frame.local_table = None;
         }
         // End
 
         // Image Data
         #[cfg(debug_assertions)]
-        println!("Image Data Offset: {}", self.offset);
+        println!("Image Data Offset: {}", *offset);
 
-        let lzw_minimum_code_size = contents[self.offset];
-        self.increment_offset(1);
+        let lzw_minimum_code_size = contents[*offset];
+        Self::increment_offset(offset, 1);
 
         // Data sub block section
-        let mut data_sub_blocks_count = contents[self.offset];
-        self.increment_offset(1);
+        let mut data_sub_blocks_count = contents[*offset];
+        Self::increment_offset(offset, 1);
+
+        let clear_code = Self::shl_or(offset, 2, (lzw_minimum_code_size - 1).into(), 0);
+        let eoi_code = clear_code + 1;
 
         let mut index_stream: Vec<u8> = Vec::new();
 
         let mut code_table: HashMap<usize, Vec<u8>> = HashMap::new();
         let mut code_stream: Vec<u16> = Vec::new();
-
-        let clear_code = self.shl_or(2, (lzw_minimum_code_size - 1).into(), 0);
-        let eoi_code = clear_code + 1;
+        for n in 0..eoi_code {
+            if n < clear_code {
+                code_table.insert(n as usize, vec![n as u8]);
+            } else {
+                code_table.insert(n as usize, vec![]);
+            }
+        }
 
         let mut last_code = eoi_code;
         let mut size: usize = (lzw_minimum_code_size + 1).into();
@@ -284,18 +288,12 @@ impl Decoder {
 
         let mut br = BitReader::new();
         loop {
-            let offset_add: usize = self.offset + data_sub_blocks_count as usize;
-            let sliced_bytes = &contents[self.offset..offset_add];
+            let offset_add: usize = *offset + data_sub_blocks_count as usize;
+            let sliced_bytes = &contents[*offset..offset_add];
 
             br.push_bytes(&sliced_bytes);
             loop {
-                let code = match br.read_bits(size) {
-                    Ok(bits) => bits,
-                    Err(err) => {
-                        println!("{}", err);
-                        exit(0x0);
-                    }
-                };
+                let code = br.read_bits(size).unwrap();
                 if code == eoi_code {
                     code_stream.push(code);
                     break;
@@ -317,11 +315,11 @@ impl Decoder {
                     match code_table.get(&(code as usize)) {
                         Some(codes) => {
                             index_stream.extend(codes);
-                        },
+                        }
                         None => {
                             println!("invalid code");
                             exit(1);
-                        },
+                        }
                     }
                     is_initalized = true;
                 } else {
@@ -332,11 +330,11 @@ impl Decoder {
                             Some(codes) => {
                                 index_stream.extend(codes);
                                 k = codes[0];
-                            },
+                            }
                             None => {
                                 println!("invalid code");
                                 exit(2);
-                            },
+                            }
                         }
                     } else {
                         match code_table.get(&(prev_code as usize)) {
@@ -344,11 +342,11 @@ impl Decoder {
                                 k = codes[0];
                                 index_stream.extend(codes);
                                 index_stream.push(k);
-                            },
+                            }
                             None => {
                                 println!("invalid code");
                                 exit(3);
-                            },
+                            }
                         }
                     }
                     if last_code < 0xFFF {
@@ -362,20 +360,19 @@ impl Decoder {
                                     size += 1;
                                     grow_code = (2 << size - 1) - 1;
                                 }
-                            },
+                            }
                             None => {
                                 println!("invalid code");
                                 exit(4);
-                            },
+                            }
                         }
                     }
                 }
                 code_stream.push(code);
                 let has_bits = match br.has_bits(size) {
-                    Ok(has_bits) => has_bits,
-                    Err(err) => {
-                        println!("{}", err);
-                        exit(0x0);
+                    Some(has_bits) => has_bits,
+                    None => {
+                        exit(0x0); ///////////todo
                     }
                 };
                 if !has_bits {
@@ -383,121 +380,88 @@ impl Decoder {
                 }
             }
 
-            self.offset = offset_add;
-            data_sub_blocks_count = contents[self.offset];
-            self.increment_offset(1);
+            *offset = offset_add;
+            data_sub_blocks_count = contents[*offset];
+            Self::increment_offset(offset, 1);
             if data_sub_blocks_count == 0 {
                 break;
             }
         }
     }
-    fn handle_plain_text_extension(&mut self, gif: &mut Gif, contents: &[u8]) {
+    fn handle_plain_text_extension(offset: &mut usize, gif: &mut Gif, contents: &[u8]) {
         // Plain Text Extension (Optional)
         #[cfg(debug_assertions)]
-        println!("Plain Text Extension Offset: {}", self.offset);
+        println!("Plain Text Extension Offset: {}", *offset);
 
-        let block_size: usize = contents[self.offset].into();
-        self.increment_offset(1 + block_size);
+        let block_size: usize = contents[*offset].into();
+        Self::increment_offset(offset, 1 + block_size);
 
         // Data sub block section
-        let mut data_sub_blocks_count = contents[self.offset];
-        self.increment_offset(1);
+        let mut data_sub_blocks_count = contents[*offset];
+        Self::increment_offset(offset, 1);
         loop {
             let mut data_sub_block;
             for n in 0..data_sub_blocks_count {
-                data_sub_block = contents[self.offset];
-                self.increment_offset(1);
+                data_sub_block = contents[*offset];
+                Self::increment_offset(offset, 1);
             }
-            data_sub_blocks_count = contents[self.offset];
-            self.increment_offset(1);
+            data_sub_blocks_count = contents[*offset];
+            Self::increment_offset(offset, 1);
             if data_sub_blocks_count == 0x00 {
                 break;
             }
         }
     }
-    fn handle_application_extension(&mut self, gif: &mut Gif, contents: &[u8]) {
+    fn handle_application_extension(offset: &mut usize, gif: &mut Gif, contents: &[u8]) {
         // Application Extension (Optional)
         #[cfg(debug_assertions)]
-        println!("Application Extension Offset: {}", self.offset);
+        println!("Application Extension Offset: {}", *offset);
 
-        let block_size: usize = contents[self.offset].into();
-        self.increment_offset(1);
+        let block_size: usize = contents[*offset].into();
+        Self::increment_offset(offset, 1);
 
         let mut application = String::from("");
-        let length = self.offset + block_size;
-        match String::from_utf8(contents[self.offset..length].to_vec()) {
+        let length = *offset + block_size;
+        match String::from_utf8(contents[*offset..length].to_vec()) {
             Ok(parsed_application) => {
                 application = parsed_application;
             }
-            Err(err) => println!("Error 3: {}", err),
+            Err(err) => println!("Attempt to get application failed: {}", err),
         }
-        self.increment_offset(block_size);
+        Self::increment_offset(offset, block_size);
 
         // Data sub block section
-        let mut data_sub_blocks_count = contents[self.offset];
-        self.increment_offset(1);
+        let mut data_sub_blocks_count = contents[*offset];
+        Self::increment_offset(offset, 1);
         loop {
             for n in 0..data_sub_blocks_count {
-                let data_sub_block = contents[self.offset];
-                self.increment_offset(1);
+                let data_sub_block = contents[*offset];
+                Self::increment_offset(offset, 1);
             }
-            data_sub_blocks_count = contents[self.offset];
-            self.increment_offset(1);
+            data_sub_blocks_count = contents[*offset];
+            Self::increment_offset(offset, 1);
             if data_sub_blocks_count == 0 {
                 break;
             }
         }
     }
-    fn handle_comment_extension(&mut self, gif: &mut Gif, contents: &[u8]) {
+    fn handle_comment_extension(offset: &mut usize, gif: &mut Gif, contents: &[u8]) {
         // Comment Extension (Optional)
         #[cfg(debug_assertions)]
-        println!("Comment Extension Offset: {}", self.offset);
+        println!("Comment Extension Offset: {}", *offset);
 
-        let mut data_sub_blocks_count = contents[self.offset];
-        self.increment_offset(1);
+        let mut data_sub_blocks_count = contents[*offset];
+        Self::increment_offset(offset, 1);
         loop {
             for n in 0..data_sub_blocks_count {
-                let data_sub_block = contents[self.offset];
-                self.increment_offset(1);
+                let data_sub_block = contents[*offset];
+                Self::increment_offset(offset, 1);
             }
-            data_sub_blocks_count = contents[self.offset];
-            self.increment_offset(1);
+            data_sub_blocks_count = contents[*offset];
+            Self::increment_offset(offset, 1);
             if data_sub_blocks_count == 0 {
                 break;
             }
         }
-    }
-}
-
-///
-
-pub struct ByteSizeError {
-    len: usize,
-    rbits: Option<usize>,
-    file: &'static str,
-    line: u32,
-    column: u32,
-}
-
-impl fmt::Display for ByteSizeError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let err_msg = match self.rbits {
-            Some(rbits) => format!(
-                "Not enough bytes to read {} bits (read {} bits) --> {}:{}:{}",
-                self.len,
-                rbits,
-                self.file,
-                self.line,
-                self.column
-            ),
-            None => format!(
-                "Exceeds max bit size: ${} (max: 12) --> {}:{}:{}",
-                self.len,
-                self.file,
-                self.line,
-                self.column
-            ),
-        };
-        write!(f, "{}", err_msg)
     }
 }
