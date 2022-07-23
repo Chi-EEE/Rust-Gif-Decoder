@@ -24,13 +24,7 @@ impl Gif {
                     buffer.push(color.red);
                     buffer.push(color.green);
                     buffer.push(color.blue);
-                    if frame.gcd.transparent_color_flag
-                        && index == (&frame.gcd.transparent_color_index)
-                    {
-                        buffer.push(0);
-                    } else {
-                        buffer.push(255);
-                    }
+                    buffer.push(255);
                 }
             } else {
                 for index in (&frame.index_stream).into_iter() {
@@ -38,13 +32,7 @@ impl Gif {
                     buffer.push(color.red);
                     buffer.push(color.green);
                     buffer.push(color.blue);
-                    if frame.gcd.transparent_color_flag
-                        && index == (&frame.gcd.transparent_color_index)
-                    {
-                        buffer.push(0);
-                    } else {
-                        buffer.push(255);
-                    }
+                    buffer.push(255);
                 }
             }
             buffers.push(buffer);
