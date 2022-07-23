@@ -1,6 +1,6 @@
 use byteorder::{ByteOrder, LittleEndian};
+use std::collections::HashMap;
 use std::process::exit;
-use std::{collections::HashMap};
 mod DataHelper;
 use DataHelper::BitReader;
 
@@ -24,7 +24,9 @@ impl Gif {
                     buffer.push(color.red);
                     buffer.push(color.green);
                     buffer.push(color.blue);
-                    if frame.gcd.transparent_color_flag && index == (&frame.gcd.transparent_color_index) {
+                    if frame.gcd.transparent_color_flag
+                        && index == (&frame.gcd.transparent_color_index)
+                    {
                         buffer.push(0);
                     } else {
                         buffer.push(255);
@@ -36,7 +38,9 @@ impl Gif {
                     buffer.push(color.red);
                     buffer.push(color.green);
                     buffer.push(color.blue);
-                    if frame.gcd.transparent_color_flag && index == (&frame.gcd.transparent_color_index) {
+                    if frame.gcd.transparent_color_flag
+                        && index == (&frame.gcd.transparent_color_index)
+                    {
                         buffer.push(0);
                     } else {
                         buffer.push(255);
@@ -191,6 +195,18 @@ impl Decoder {
         // Trailer
         println!("End of file.");
         return Ok(gif);
+    }
+    fn skip(offset: &mut usize, contents: &[u8]) {
+      let mut data_sub_blocks_count = contents[*offset];
+      Self::increment_offset(offset, 1);
+      loop {
+        Self::increment_offset(offset, data_sub_blocks_count.into());
+        data_sub_blocks_count = contents[*offset];
+        Self::increment_offset(offset, 1);
+        if data_sub_blocks_count == 0x00 {
+          break;
+        }
+      }
     }
     fn increment_offset(offset: &mut usize, amount: usize) {
         *offset += amount;
@@ -437,21 +453,7 @@ impl Decoder {
         let block_size: usize = contents[*offset].into();
         Self::increment_offset(offset, 1 + block_size);
 
-        // Data sub block section
-        let mut data_sub_blocks_count = contents[*offset];
-        Self::increment_offset(offset, 1);
-        loop {
-            let mut data_sub_block;
-            for n in 0..data_sub_blocks_count {
-                data_sub_block = contents[*offset];
-                Self::increment_offset(offset, 1);
-            }
-            data_sub_blocks_count = contents[*offset];
-            Self::increment_offset(offset, 1);
-            if data_sub_blocks_count == 0x00 {
-                break;
-            }
-        }
+        Self::skip(offset, contents);
     }
     fn handle_application_extension(offset: &mut usize, gif: &mut Gif, contents: &[u8]) {
         // Application Extension (Optional)
@@ -471,38 +473,13 @@ impl Decoder {
         }
         Self::increment_offset(offset, block_size);
 
-        // Data sub block section
-        let mut data_sub_blocks_count = contents[*offset];
-        Self::increment_offset(offset, 1);
-        loop {
-            for n in 0..data_sub_blocks_count {
-                let data_sub_block = contents[*offset];
-                Self::increment_offset(offset, 1);
-            }
-            data_sub_blocks_count = contents[*offset];
-            Self::increment_offset(offset, 1);
-            if data_sub_blocks_count == 0 {
-                break;
-            }
-        }
+        Self::skip(offset, contents);
     }
     fn handle_comment_extension(offset: &mut usize, gif: &mut Gif, contents: &[u8]) {
         // Comment Extension (Optional)
         #[cfg(debug_assertions)]
         println!("Comment Extension Offset: {}", *offset);
 
-        let mut data_sub_blocks_count = contents[*offset];
-        Self::increment_offset(offset, 1);
-        loop {
-            for n in 0..data_sub_blocks_count {
-                let data_sub_block = contents[*offset];
-                Self::increment_offset(offset, 1);
-            }
-            data_sub_blocks_count = contents[*offset];
-            Self::increment_offset(offset, 1);
-            if data_sub_blocks_count == 0 {
-                break;
-            }
-        }
+        Self::skip(offset, contents);
     }
 }
