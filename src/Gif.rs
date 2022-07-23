@@ -197,16 +197,16 @@ impl Decoder {
         return Ok(gif);
     }
     fn skip(offset: &mut usize, contents: &[u8]) {
-      let mut data_sub_blocks_count = contents[*offset];
-      Self::increment_offset(offset, 1);
-      loop {
-        Self::increment_offset(offset, data_sub_blocks_count.into());
-        data_sub_blocks_count = contents[*offset];
+        let mut data_sub_blocks_count = contents[*offset];
         Self::increment_offset(offset, 1);
-        if data_sub_blocks_count == 0x00 {
-          break;
+        loop {
+            Self::increment_offset(offset, data_sub_blocks_count.into());
+            data_sub_blocks_count = contents[*offset];
+            Self::increment_offset(offset, 1);
+            if data_sub_blocks_count == 0x00 {
+                break;
+            }
         }
-      }
     }
     fn increment_offset(offset: &mut usize, amount: usize) {
         *offset += amount;
@@ -328,7 +328,8 @@ impl Decoder {
 
         let mut code_table: HashMap<usize, Vec<u8>> = HashMap::new();
         let mut code_stream: Vec<u16> = Vec::new();
-        for n in 0..eoi_code {
+
+        for n in 0..=eoi_code {
             if n < clear_code {
                 code_table.insert(n as usize, vec![n as u8]);
             } else {
@@ -350,13 +351,16 @@ impl Decoder {
             br.push_bytes(&sliced_bytes);
             loop {
                 let code = br.read_bits(size).unwrap();
+
                 if code == eoi_code {
                     code_stream.push(code);
+                    break;
+                } else if code > last_code {
                     break;
                 } else if code == clear_code {
                     code_stream = Vec::new();
                     code_table = HashMap::new();
-                    for n in 0..eoi_code {
+                    for n in 0..=eoi_code {
                         if n < clear_code {
                             code_table.insert(n as usize, vec![n as u8]);
                         } else {
@@ -373,7 +377,7 @@ impl Decoder {
                             index_stream.extend(codes);
                         }
                         None => {
-                            println!("invalid code");
+                            println!("invalid code: {}", code);
                             exit(1);
                         }
                     }
@@ -388,7 +392,7 @@ impl Decoder {
                                 k = codes[0];
                             }
                             None => {
-                                println!("invalid code");
+                                println!("invalid code: {}", code);
                                 exit(2);
                             }
                         }
@@ -400,7 +404,7 @@ impl Decoder {
                                 index_stream.push(k);
                             }
                             None => {
-                                println!("invalid code");
+                                println!("invalid code: {}", prev_code);
                                 exit(3);
                             }
                         }
@@ -418,7 +422,7 @@ impl Decoder {
                                 }
                             }
                             None => {
-                                println!("invalid code");
+                                println!("invalid code: {}", prev_code);
                                 exit(4);
                             }
                         }

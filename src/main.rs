@@ -1,7 +1,7 @@
 mod Gif;
 
 fn main() -> std::io::Result<()> {
-    match Gif::Decoder::decode("./gifs/shake.gif") {
+    match Gif::Decoder::decode("./gifs/no.gif") {
         Ok(mut gif) => {
             let buffers = gif.process_frames();
             for buffer in buffers.into_iter() {
