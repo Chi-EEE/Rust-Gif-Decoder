@@ -20,7 +20,7 @@ impl BitReader {
     fn shr_or(&mut self, val: u16, shift: usize, def: u16) -> u16 {
         [val >> (shift & 15), def][((shift & !15) != 0) as usize]
     }
-    pub fn read_bits(&mut self, len: usize) -> Option<u16> {
+    pub fn read_bits(&mut self, len: usize, code_mask: u16) -> Option<u16> {
         let mut result = 0;
         let mut rbits: usize = 0;
         while rbits < len {
@@ -37,11 +37,8 @@ impl BitReader {
             }
             let bbits = std::cmp::min(8 - self.bit_offset, len - rbits);
 
-            let temp = self.shr_or(0xFF, 8 - bbits, 0);
-            let mask = self.shl_or(temp, self.bit_offset, 0);
-
             let temp = self.shr_or(
-                self.bytes[self.byte_offset] as u16 & mask,
+                self.bytes[self.byte_offset] as u16 & code_mask,
                 self.bit_offset,
                 0,
             );
