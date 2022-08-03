@@ -3,6 +3,13 @@ use std::ops::IndexMut;
 
 const MAX_STACK_SIZE: u16 = 4096;
 
+fn shl_or(val: u16, shift: usize, def: u16) -> u16 {
+    [val << (shift & 15), def][((shift & !15) != 0) as usize]
+}
+fn shr_or(val: u16, shift: usize, def: u16) -> u16 {
+    [val >> (shift & 15), def][((shift & !15) != 0) as usize]
+}
+
 #[derive(Default)]
 pub struct Gif {
     pub version: String,
@@ -220,12 +227,6 @@ impl Decoder {
     fn increment_offset(offset: &mut usize, amount: usize) {
         *offset += amount;
     }
-    fn shl_or(val: u16, shift: usize, def: u16) -> u16 {
-        [val << (shift & 15), def][((shift & !15) != 0) as usize]
-    }
-    fn shr_or(val: u16, shift: usize, def: u16) -> u16 {
-        [val >> (shift & 15), def][((shift & !15) != 0) as usize]
-    }
     fn handle_logical_screen_descriptor(gif: &mut Gif, contents: &[u8]) {
         // Logic Screen Descriptor
         #[cfg(debug_assertions)]
@@ -327,12 +328,12 @@ impl Decoder {
         let lzw_minimum_code_size = contents[*offset];
         Self::increment_offset(offset, 1);
 
-        let clear_code = Self::shl_or(1, lzw_minimum_code_size as usize, 0);
+        let clear_code = shl_or(1, lzw_minimum_code_size as usize, 0);
         let eoi_code = clear_code + 1;
         let mut available = clear_code + 2;
         let mut old_code = null_code;
         let mut code_size: usize = (lzw_minimum_code_size + 1) as usize;
-        let mut code_mask = Self::shl_or(1, code_size, 0) - 1;
+        let mut code_mask = shl_or(1, code_size, 0) - 1;
 
         let mut prefix: Vec<u16> = vec![0; MAX_STACK_SIZE as usize]; // No need to fill with 0 (already filled)
         let mut suffix: Vec<u8> = vec![0; MAX_STACK_SIZE as usize];
@@ -370,21 +371,21 @@ impl Decoder {
                         *offset = offset_add;
                         bi = 0;
                     }
-                    datum += Self::shl_or(block[bi as usize] as u16 & 0xFF, bits, 0);
+                    datum += shl_or(block[bi as usize] as u16 & 0xFF, bits, 0);
                     bits += 8;
                     bi += 1;
                     data_sub_blocks_count -= 1;
                     continue;
                 }
                 let mut code = datum & code_mask;
-                datum = Self::shr_or(datum, code_size, 0);
+                datum = shr_or(datum, code_size, 0);
                 bits -= code_size;
                 if code > available || code == eoi_code {
                     break;
                 }
                 if code == clear_code {
                     code_size = (lzw_minimum_code_size + 1) as usize;
-                    code_mask = Self::shl_or(1, code_size, 0) - 1;
+                    code_mask = shl_or(1, code_size, 0) - 1;
                     available = clear_code + 2;
                     old_code = null_code;
                     continue;
