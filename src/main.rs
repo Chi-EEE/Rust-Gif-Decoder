@@ -1,17 +1,18 @@
 mod Gif;
 
 fn main() -> std::io::Result<()> {
-    match Gif::Decoder::decode("./gifs/no.gif") {
+    match Gif::Decoder::decode("./gifs/danger.gif") {
         Ok(mut gif) => {
-            let frames = gif.frames;
-            println!("Count: {}", frames.len());
-            // for frame in frames.into_iter() {
-            //     println!("{:?}", frame.index_stream);
+            let frames = &gif.frames;
+            // println!("Count: {}", frames.len());
+            for frame in frames.into_iter() {
+                println!("{:?}", frame.index_stream.len());
+            }
+            // let buffers = &gif.process_frames();
+            // for buffer in buffers.into_iter() {
+            //     // println!("{:?}", buffer);
+            //     println!("{}", buffer.len());
             // }
-            // let buffers = gif.process_frames();
-            /*for buffer in buffers.into_iter() {
-                println!("{:?}", buffer);
-            }*/
         },
         Err(_) => {},
     };

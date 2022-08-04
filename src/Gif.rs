@@ -3,11 +3,11 @@ use std::ops::IndexMut;
 
 const MAX_STACK_SIZE: u16 = 4096;
 
-fn shl_or(val: u16, shift: usize, def: u16) -> u16 {
-    [val << (shift & 15), def][((shift & !15) != 0) as usize]
+fn shl_or(val: u32, shift: usize, def: u32) -> u32 {
+    [val << (shift & 31), def][((shift & !31) != 0) as usize]
 }
-fn shr_or(val: u16, shift: usize, def: u16) -> u16 {
-    [val >> (shift & 15), def][((shift & !15) != 0) as usize]
+fn shr_or(val: u32, shift: usize, def: u32) -> u32 {
+    [val >> (shift & 31), def][((shift & !31) != 0) as usize]
 }
 
 #[derive(Default)]
@@ -69,15 +69,6 @@ pub struct LogicalScreenDescriptor {
     pub background_color_index: u8,
     pub pixel_aspect_ratio: u8,
 }
-
-#[derive(Default)]
-pub struct ParsedFrame {
-    pub gcd: GraphicsControlExtension,
-    pub im: ImageDescriptor,
-    pub local_table: Option<Vec<Color>>,
-    pub buffer: Vec<u8>,
-}
-
 #[derive(Default)]
 pub struct Frame {
     pub gcd: GraphicsControlExtension,
@@ -303,7 +294,7 @@ impl Decoder {
         // End
 
         // Local Color Table
-        if (parsed_frame.im.local_color_table_flag) {
+        if parsed_frame.im.local_color_table_flag {
             let length: usize = 3 * 2 << parsed_frame.im.local_color_table_size;
             let mut i: usize = *offset;
             let mut local_color_vector: Vec<Color> = Vec::new();
@@ -333,6 +324,7 @@ impl Decoder {
         let mut available = clear_code + 2;
         let mut old_code = null_code;
         let mut code_size: usize = (lzw_minimum_code_size + 1) as usize;
+        println!("{}, {}, {}", *offset, lzw_minimum_code_size, code_size);
         let mut code_mask = shl_or(1, code_size, 0) - 1;
 
         let mut prefix: Vec<u16> = vec![0; MAX_STACK_SIZE as usize]; // No need to fill with 0 (already filled)
@@ -350,7 +342,7 @@ impl Decoder {
 
         let mut in_code = 0;
         let mut first: u8 = 0;
-        let mut datum = 0;
+        let mut datum: u32 = 0;
         let mut bits = 0;
         let mut data_sub_blocks_count = 0;
         let mut bi = 0;
@@ -358,20 +350,20 @@ impl Decoder {
         let mut n = 0;
         while n < npix {
             if top == 0 {
-                if (bits < code_size) {
+                if bits < code_size {
                     if data_sub_blocks_count == 0 {
                         data_sub_blocks_count = contents[*offset];
                         Self::increment_offset(offset, 1);
-                        if data_sub_blocks_count <= 0 {
+                        if data_sub_blocks_count == 0 {
                             break;
                         }
                         let offset_add: usize = *offset + data_sub_blocks_count as usize;
                         block = &contents[*offset..offset_add];
-
                         *offset = offset_add;
+                        
                         bi = 0;
                     }
-                    datum += shl_or(block[bi as usize] as u16 & 0xFF, bits, 0);
+                    datum += shl_or(block[bi as usize] as u32 & 0xFF, bits, 0);
                     bits += 8;
                     bi += 1;
                     data_sub_blocks_count -= 1;
@@ -380,6 +372,7 @@ impl Decoder {
                 let mut code = datum & code_mask;
                 datum = shr_or(datum, code_size, 0);
                 bits -= code_size;
+                println!("{} {} {} {} {} {}", code_mask, n, code, available, eoi_code, datum);
                 if code > available || code == eoi_code {
                     break;
                 }
@@ -391,7 +384,8 @@ impl Decoder {
                     continue;
                 }
                 if old_code == null_code {
-                    index_stream.push(suffix[code as usize]);
+                    *pixel_stack.index_mut(top as usize) = suffix[code as usize];
+                    top += 1;
                     old_code = code as i32;
                     first = code as u8;
                     continue;
@@ -400,23 +394,23 @@ impl Decoder {
                 if code == available {
                     *pixel_stack.index_mut(top as usize) = first as u8;
                     top += 1;
-                    code = old_code as u16;
+                    code = old_code as u32;
                 }
                 while code > clear_code {
                     *pixel_stack.index_mut(top as usize) = suffix[code as usize];
                     top += 1;
-                    code = prefix[code as usize];
+                    code = prefix[code as usize] as u32;
                 }
                 first = suffix[code as usize] & 0xFF;
 
                 *pixel_stack.index_mut(top as usize) = first;
                 top += 1;
 
-                if available < MAX_STACK_SIZE {
+                if available < MAX_STACK_SIZE as u32 {
                     *prefix.index_mut(available as usize) = old_code as u16;
                     *suffix.index_mut(available as usize) = first;
                     available += 1;
-                    if (available & code_mask) == 0 && available < MAX_STACK_SIZE {
+                    if (available & code_mask) == 0 && available < MAX_STACK_SIZE as u32 {
                         code_size += 1;
                         code_mask += available;
                     }
@@ -428,10 +422,10 @@ impl Decoder {
             n += 1;
         }
         for _ in index_stream.len()..npix as usize {
-            index_stream.push(0);
+            index_stream.push(0);// clear missing pixels
         }
-        println!("{:?}", index_stream);
         // End
+        parsed_frame.index_stream = index_stream;
     }
     fn handle_plain_text_extension(offset: &mut usize, gif: &mut Gif, contents: &[u8]) {
         // Plain Text Extension (Optional)
