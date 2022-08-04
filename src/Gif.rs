@@ -23,33 +23,23 @@ impl Gif {
         let frames_iter = self.frames.iter();
         for frame in frames_iter {
             let mut buffer: Vec<u8> = Vec::new();
+            let color_table;
             if (frame.im.local_color_table_flag) {
-                for index in (&frame.index_stream).into_iter() {
-                    let color = frame.local_table.get(*index as usize).unwrap();
-                    buffer.push(color.red);
-                    buffer.push(color.green);
-                    buffer.push(color.blue);
-                    if frame.gcd.transparent_color_flag
-                        && index == (&frame.gcd.transparent_color_index)
-                    {
-                        buffer.push(0);
-                    } else {
-                        buffer.push(255);
-                    }
-                }
+                color_table = &frame.local_table;
             } else {
-                for index in (&frame.index_stream).into_iter() {
-                    let color = self.global_table.get(*index as usize).unwrap();
-                    buffer.push(color.red);
-                    buffer.push(color.green);
-                    buffer.push(color.blue);
-                    if frame.gcd.transparent_color_flag
-                        && index == (&frame.gcd.transparent_color_index)
-                    {
-                        buffer.push(0);
-                    } else {
-                        buffer.push(255);
-                    }
+                color_table = &self.global_table;
+            }
+            for index in (&frame.index_stream).into_iter() {
+                let color = color_table.get(*index as usize).unwrap();
+                buffer.push(color.red.try_into().unwrap());
+                buffer.push(color.green.try_into().unwrap());
+                buffer.push(color.blue.try_into().unwrap());
+                if frame.gcd.transparent_color_flag
+                    && index == (&frame.gcd.transparent_color_index.try_into().unwrap())
+                {
+                    buffer.push(0);
+                } else {
+                    buffer.push(255);
                 }
             }
             buffers.push(buffer);
@@ -324,7 +314,7 @@ impl Decoder {
         let mut available = clear_code + 2;
         let mut old_code = null_code;
         let mut code_size: usize = (lzw_minimum_code_size + 1) as usize;
-        println!("{}, {}, {}", *offset, lzw_minimum_code_size, code_size);
+        // println!("{}, {}, {}", *offset, lzw_minimum_code_size, code_size);
         let mut code_mask = shl_or(1, code_size, 0) - 1;
 
         let mut prefix: Vec<u16> = vec![0; MAX_STACK_SIZE as usize]; // No need to fill with 0 (already filled)
@@ -360,7 +350,7 @@ impl Decoder {
                         let offset_add: usize = *offset + data_sub_blocks_count as usize;
                         block = &contents[*offset..offset_add];
                         *offset = offset_add;
-                        
+
                         bi = 0;
                     }
                     datum += shl_or(block[bi as usize] as u32 & 0xFF, bits, 0);
@@ -372,7 +362,7 @@ impl Decoder {
                 let mut code = datum & code_mask;
                 datum = shr_or(datum, code_size, 0);
                 bits -= code_size;
-                println!("{} {} {} {} {} {}", code_mask, n, code, available, eoi_code, datum);
+                // println!("{} {} {} {} {} {}", code_mask, n, code, available, eoi_code, datum);
                 if code > available || code == eoi_code {
                     break;
                 }
@@ -422,10 +412,48 @@ impl Decoder {
             n += 1;
         }
         for _ in index_stream.len()..npix as usize {
-            index_stream.push(0);// clear missing pixels
+            index_stream.push(0); // clear missing pixels
+        }
+        if parsed_frame.im.interface_flag {
+            index_stream = Self::deinterface(&mut index_stream, parsed_frame.im.width as usize);
         }
         // End
         parsed_frame.index_stream = index_stream;
+    }
+    // deinterlace function from https://github.com/shachaf/jsgif
+    fn deinterface(index_stream: &mut Vec<u8>, width: usize) -> Vec<u8> {
+        let mut new_index_stream = vec![0; index_stream.len()];
+        let rows = index_stream.len() / width;
+
+        fn cp_row(
+            index_stream: &mut Vec<u8>,
+            width: usize,
+            new_index_stream: &mut Vec<u8>,
+            to_row: usize,
+            from_row: usize,
+        ) {
+            let from_pixels = &index_stream[from_row * width..(from_row + 1) * width];
+            new_index_stream.splice(width..to_row * width, from_pixels.to_vec());
+        }
+
+        // See appendix E.
+        let offsets = [0, 4, 2, 1];
+        let steps = [8, 8, 4, 2];
+
+        let mut from_row = 0;
+        for pass in 0..4 {
+            let mut to_row = offsets[pass];
+            loop {
+                if to_row >= rows {
+                    break;
+                }
+                cp_row(index_stream, width, &mut new_index_stream, to_row, from_row);
+                from_row += 1;
+                to_row += steps[pass];
+            }
+        }
+
+        return new_index_stream;
     }
     fn handle_plain_text_extension(offset: &mut usize, gif: &mut Gif, contents: &[u8]) {
         // Plain Text Extension (Optional)
