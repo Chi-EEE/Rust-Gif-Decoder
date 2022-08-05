@@ -30,16 +30,24 @@ impl Gif {
                 color_table = &self.global_table;
             }
             for index in (&frame.index_stream).into_iter() {
-                let color = color_table.get(*index as usize).unwrap();
-                buffer.push(color.red.try_into().unwrap());
-                buffer.push(color.green.try_into().unwrap());
-                buffer.push(color.blue.try_into().unwrap());
-                if frame.gcd.transparent_color_flag
-                    && index == (&frame.gcd.transparent_color_index.try_into().unwrap())
-                {
-                    buffer.push(0);
-                } else {
-                    buffer.push(255);
+                match color_table.get(*index as usize) {
+                    Some(color) => {
+                        buffer.push(color.red.try_into().unwrap());
+                        buffer.push(color.green.try_into().unwrap());
+                        buffer.push(color.blue.try_into().unwrap());
+                        if frame.gcd.transparent_color_flag
+                            && index == (&frame.gcd.transparent_color_index.try_into().unwrap())
+                        {
+                            buffer.push(0);
+                        } else {
+                            buffer.push(255);
+                        }
+                    }
+                    None => {
+                        for _ in 0..4 {
+                            buffer.push(255);
+                        }
+                    }
                 }
             }
             buffers.push(buffer);
@@ -188,6 +196,7 @@ impl Decoder {
             }
         }
         // Trailer
+        #[cfg(debug_assertions)]
         println!("End of file.");
         return Ok(gif);
     }
@@ -299,6 +308,7 @@ impl Decoder {
                 i = i + 3;
             }
             Self::increment_offset(offset, length);
+            #[cfg(debug_assertions)]
             println!("End of local color table: {}, Length: {}", *offset, length);
             parsed_frame.local_table = local_color_vector;
         }
@@ -314,7 +324,6 @@ impl Decoder {
         let mut available = clear_code + 2;
         let mut old_code = null_code;
         let mut code_size: usize = (lzw_minimum_code_size + 1) as usize;
-        // println!("{}, {}, {}", *offset, lzw_minimum_code_size, code_size);
         let mut code_mask = shl_or(1, code_size, 0) - 1;
 
         let mut prefix: Vec<u16> = vec![0; MAX_STACK_SIZE as usize]; // No need to fill with 0 (already filled)
@@ -362,7 +371,6 @@ impl Decoder {
                 let mut code = datum & code_mask;
                 datum = shr_or(datum, code_size, 0);
                 bits -= code_size;
-                // println!("{} {} {} {} {} {}", code_mask, n, code, available, eoi_code, datum);
                 if code > available || code == eoi_code {
                     break;
                 }
