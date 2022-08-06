@@ -83,7 +83,7 @@ pub struct ImageDescriptor {
     pub width: u16,
     pub height: u16,
     pub local_color_table_flag: bool,
-    pub interface_flag: bool,
+    pub interlace_flag: bool,
     pub sort_flag: bool,
     pub local_color_table_size: u8,
 }
@@ -286,7 +286,7 @@ impl Decoder {
 
         let packed_field = contents[*offset];
         parsed_frame.im.local_color_table_flag = (packed_field & 0b1000_0000) != 0;
-        parsed_frame.im.interface_flag = (packed_field & 0b0100_0000) != 0;
+        parsed_frame.im.interlace_flag = (packed_field & 0b0100_0000) != 0;
         parsed_frame.im.sort_flag = (packed_field & 0b0010_0000) != 0;
         // let _ = (packed_field & 0b0001_1000) as u8; // Future use
         parsed_frame.im.local_color_table_size = (packed_field & 0b0000_0111) as u8;
@@ -423,14 +423,14 @@ impl Decoder {
         for _ in index_stream.len()..npix as usize {
             index_stream.push(0); // clear missing pixels
         }
-        if parsed_frame.im.interface_flag {
-            index_stream = Self::deinterface(&mut index_stream, parsed_frame.im.width as usize);
+        if parsed_frame.im.interlace_flag {
+            index_stream = Self::deinterlace(&mut index_stream, parsed_frame.im.width as usize);
         }
         // End
         parsed_frame.index_stream = index_stream;
     }
     // deinterlace function from https://github.com/shachaf/jsgif
-    fn deinterface(index_stream: &mut Vec<u8>, width: usize) -> Vec<u8> {
+    fn deinterlace(index_stream: &mut Vec<u8>, width: usize) -> Vec<u8> {
         let mut new_index_stream = vec![0; index_stream.len()];
         let rows = index_stream.len() / width;
 
