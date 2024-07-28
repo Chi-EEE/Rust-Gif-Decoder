@@ -109,8 +109,11 @@ pub(crate) struct Decoder {}
 impl Decoder {
     pub fn decode_path(file_path: &str) -> Result<Gif, ()> {
         let contents = std::fs::read(file_path).expect("Something went wrong reading the file");
-
         let contents = contents.as_slice();
+        return Self::decode_internal(contents);
+    }
+
+    fn decode_internal(contents: &[u8]) -> Result<Gif, ()> {
         {
             let mut signature: String = String::new();
             match String::from_utf8(contents[0..3].to_vec()) {
@@ -123,10 +126,6 @@ impl Decoder {
                 return Err(());
             }
         }
-        return Self::decode_internal(contents);
-    }
-    
-    fn decode_internal(contents: &[u8]) -> Result<Gif, ()> {
         let mut gif = Gif::default();
         let mut version: String = String::new();
         match String::from_utf8(contents[3..6].to_vec()) {
