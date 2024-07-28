@@ -1,7 +1,7 @@
 mod Gif;
 
 fn main() -> std::io::Result<()> {
-    match Gif::Decoder::decode("./gifs/chest.gif") {
+    match Gif::Decoder::decode_path("./gifs/chest.gif") {
         Ok(mut gif) => {
             let frames = &gif.frames;
             // println!("Count: {}", frames.len());
